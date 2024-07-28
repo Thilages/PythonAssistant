@@ -1,6 +1,5 @@
-
 import time
-
+# import whisper
 import pyaudio
 import wave
 import threading
@@ -17,6 +16,7 @@ audio = pyaudio.PyAudio()
 
 stream = audio.open(format=FORMAT,channels=CHANNEL,rate=RATE
                     ,frames_per_buffer=CHUNK,input=True)
+# model = whisper.load_model("base")
 record = False
 recognizier = speech_recognition.Recognizer()
 def recording():
