@@ -35,8 +35,6 @@ class SpeechRecognizer:
         print("Processing audio")
         try:
             text = self.recognizer.recognize_google(audio, language="en-US")
-
-            print(text)
             self.process_text(text)
         except speech_recognition.UnknownValueError:
             print("Could not understand audio")
