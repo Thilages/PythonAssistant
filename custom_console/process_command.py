@@ -2,12 +2,19 @@ import random
 import os
 import sys
 import threading
-import pyttsx3
 import tkinter as tk
 from groq import Groq
-import pyperclip
 from speach_recognition import SpeechRecognizer
 import keyboard
+import pyttsx3
+import time
+import concurrent.futures
+import pydub
+import edge_tts
+from pydub.playback import play
+from pydub.audio_segment import AudioSegment
+import io
+import re
 
 
 class ProcessCommand:
@@ -17,58 +24,46 @@ class ProcessCommand:
         self.text_ = widget
         self.speaker = pyttsx3.init()
         self.window = root
-        keyboard.on_press_key("right", lambda _: self.start_listening2())
+        keyboard.on_press_key("numlock", lambda _: self.start_listening2())
         keyboard.on_press_key("esc", lambda _: self.exit_application())
-        self.text_.bind("<space>", lambda
-            e: self.stop_speaking() if self.speaking and not self.stop_speaking_event.is_set() else None)
+        self.text_.bind("<space>", lambda e: self.stop_speaking() if self.speaking and not self.stop_speaking_event.is_set() else None)
         self.stop_speaking_event = threading.Event()
         self.speaker.setProperty('voice', self.speaker.getProperty('voices')[1].id)
         self.groq_client = Groq(api_key="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")
-        self.speaker.setProperty('rate', 260)  # Speed of speech
-        self.speaker.setProperty('volume', 1)
+        self.rate = "0"
         self.speaking = False
         self.speak = False
         self.recording = False
         self.last_response = ""
         self.speech_thread = None
         self.reply_type = ""
+        self.voice = "en-US-JennyNeural"
+        self.female_voice = [
+            'en-AU-NatashaNeural', 'en-GB-LibbyNeural', 'en-GB-MaisieNeural', 'en-GB-SoniaNeural',
+            'en-US-AvaNeural', 'en-US-EmmaNeural', 'en-US-AnaNeural', 'en-US-JennyNeural',
+        ]
+        self.male_voice = [
+            'en-AU-WilliamNeural', 'en-GB-RyanNeural', 'en-GB-ThomasNeural', 'en-GB-RyanNeural',
+            'en-US-AndrewNeural', 'en-US-BrianNeural', 'en-US-ChristopherNeural', 'en-US-EricNeural',
+
+        ]
 
         self.action_commands = {
-            "listen": self.start_listening,
-            "fg": self.change_fg,
-            "bg": self.change_bg,
+            "start_listening": self.start_listening,
+            "set_fg": self.change_fg,
+            "set_bg": self.change_bg,
             "clear": self.clear_console,
-            "fontsize": self.change_font_size,
+            "font_size": self.change_font_size,
             "echo": self.echo_command,
-            "commands": self.list_commands,
+            "ls": self.list_commands,
             "exit": self.exit_application,
-            "flip": self.flip_coin,
-            "copy": self.copy_last_response,
-            "speak": self.speak_toggle,
-            "speedspeach": self.manage_speed,
-            "changevoice": self.change_voice,
-            "stop": self.stop_speaking,
-            "replytype":self.set_reply_type
+            "flip_coin": self.flip_coin,
+            "copy_response": self.copy_last_response,
+            "toggle_speak": self.speak_toggle,
+            "set_speed": self.manage_speed,
+            "change_voice": self.change_voice,
+            "set_reply": self.set_reply_type
         }
-
-        # self.str_commands = {
-        #     "hello": "Ahoy, matey! Ready for some command fun?",
-        #     "bye": "Catch you later, alligator!",
-        #     "how are you": "I'm as good as the code I run!",
-        #     "what's up": "The ceiling, mostly. And some code bugs.",
-        #     "who are you": "Just your friendly neighborhood console, here to help!",
-        #     "tell me a joke": "Why do programmers always mix up Christmas and Halloween? Because Oct 31 equals Dec 25!",
-        #     "sing": "I’d sing if my speakers weren’t turned off!",
-        #     "dance": "I’d dance, but I’m stuck in this code loop.",
-        #     "are you alive": "Alive and well, as far as the CPU is concerned!",
-        #     "what is your purpose": "To assist you and occasionally tell terrible jokes.",
-        #     "do you sleep": "Sleep is for the uncompiled. I’m always awake!",
-        #     "help": "Help is on the way! Or at least, I’m trying my best.",
-        #     "thank you": "You’re welcome! I live to serve... and debug.",
-        #     "what time is it": "Time for you to get a watch, I’m afraid.",
-        #     "how’s the weather": "I can’t check the weather, but I’m sure it’s perfect for coding!",
-        #     "who is your owner": "MR.Thilagesh"
-        # }
 
     def work_on_command(self, command, speach=False):
         action_parts = command.strip().split()
@@ -81,17 +76,10 @@ class ProcessCommand:
                 command_(command_args)
             else:
                 command_()
-
-        # elif self.str_commands.get(command):
-        #     reply = self.str_commands.get(command)
-        #     self.print_console(reply)
-        #     if self.speak:
-        #         self.speak_function(reply)
-
         else:
             if self.speak:
                 self.text_.delete('1.0', tk.END)
-            response = self.groq_reply(command,reply_type=self.reply_type)
+            response = self.groq_reply(command, reply_type=self.reply_type)
             self.last_response = response
             self.print_console(response, new_line=True)
             if self.speak:
@@ -101,22 +89,33 @@ class ProcessCommand:
             self.text_.insert('insert', '\n')
             self.text_.yview(tk.END)
 
-    def set_reply_type(self,replytype):
+    def set_reply_type(self, replytype):
         self.reply_type = str(replytype)
         self.print_console(f"Reply type updated to : {self.reply_type}")
 
     def manage_speed(self, speed):
-        self.speaker.setProperty("rate", int(speed) if int(speed) > 100 else None)
-        self.print_console(f"Speed Updated : {speed}")
+        self.rate = speed
+        self.print_console(f"Speed Updated : +{speed}%")
 
-    def change_voice(self, gender="female"):
-        voices = self.speaker.getProperty('voices')
-        if gender == "male":
-            self.speaker.setProperty('voice', voices[0].id)
-            self.print_console("Updated to male voice")
+    def list_edge_voices(self):
+        voice_list = self.male_voice + self.female_voice
+        self.print_console(f"Available voices: {voice_list}")
+
+    def change_voice(self, voice=None):
+        if voice is None:
+            # If no voice is specified, list available voices
+            self.list_edge_voices()
+            return
+        elif voice == "random":
+            self.voice = random.choice(self.female_voice)
+            self.print_console(f"Voice updated to {self.voice}")
         else:
-            self.speaker.setProperty('voice', voices[1].id)
-            self.print_console("Updated to female voice")
+            if voice in self.female_voice or voice in self.male_voice:
+                self.voice = voice
+                self.print_console(f"Voice updated to {voice}")
+            else:
+                self.list_edge_voices()
+                self.print_console(f"Voice '{voice}' not found. Please choose from the available voices.")
 
     def flip_coin(self):
         self.print_console(random.choice(["Heads", "Tails"]))
@@ -125,43 +124,54 @@ class ProcessCommand:
         self.speak = not self.speak
         self.print_console(f"Text to Speech : {str(self.speak)}")
 
+    def audio_data(self, text):
+        communicate = edge_tts.Communicate(text, voice=self.voice, rate=f"+{self.rate}%")
+        audio_buffer = []
+        for chunk in communicate.stream_sync():
+            if chunk["type"] == "audio":
+                audio_buffer.extend(chunk["data"])
+        return audio_buffer
+
     def clear_console(self):
         self.text_.delete('1.0', tk.END)
         self.print_console("Console cleared.", new_line=False)
 
     def _speak_text(self, text):
-        lines = text.split(".")
-        # lines = (self.text_.get("1.0",tk.END)).split(".") ## This works very well but the speach translation is very bad
-        # Filter out lines that are too short
-        lines = [line.strip() for line in lines if len(line.strip()) > 2]
+
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        lines = [line for line in sentences if len(line) > 2]
+
+        start = time.perf_counter()
         self.speaking = True
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Submit tasks for each text and store futures in a list
+            futures = [executor.submit(self.audio_data, text) for text in lines]
 
-        for line in lines:
-            if self.stop_speaking_event.is_set():
-                self.speaking = False
-                self.stop_speaking_event.clear()
-                break
-            search_text = (" ".join(line.split(" ")[:2])).strip()
-            print(search_text)
-            # Find the position of the line in the text widget
-            idx = self.text_.search(search_text, "1.0", stopindex=tk.END)
-            if idx:
-                # Move the view to make sure the line is visible
-                top, bottom = self.text_.yview()
-                self.text_.yview_moveto(min(top + 0.5, 1))
-                self.text_.see(idx)
+            # Collect results in the order of submission
+            audio_buffers = [future.result() for future in futures]
 
-            else:
-                print("found nothing")
-            # Say the line
-            self.speaker.say(line)
-            self.speaker.runAndWait()
+        end = time.perf_counter()
+
+        print(f"Time Taken : {end - start}")
+
+        for buffer in audio_buffers:
+            if not self.stop_speaking_event.is_set():
+                combined_audio = AudioSegment.empty()
+                # Use in-memory buffer
+                audio_stream = io.BytesIO(bytes(buffer))
+                try:
+                    audio_segment = AudioSegment.from_file(audio_stream, format="mp3")
+                    combined_audio += audio_segment
+                    play(audio_segment)
+                except Exception as e:
+                    print(f"Error processing audio: {e}")
+
 
         self.speaking = False
 
     def stop_speaking(self):
-        self.stop_speaking_event.set()
         self.print_console("Stopping speech....\n")
+        self.stop_speaking_event.set()
 
     def speak_function(self, text):
         self.stop_speaking_event.clear()
@@ -200,7 +210,8 @@ class ProcessCommand:
 
     def list_commands(self):
         commands = list(self.action_commands.keys())
-        self.print_console(f"Available commands: {commands}", new_line=True)
+        formatted_commands = ''.join(f"{cmd}||" for cmd in commands)
+        self.print_console(formatted_commands)
 
     def exit_application(self):
         if self.speaking:
@@ -229,12 +240,12 @@ class ProcessCommand:
         except:
             self.print_console(f'{color} does not exist. Are you colorblind?')
 
-    def groq_reply(self, command,reply_type="Helpful"):
+    def groq_reply(self, command, reply_type="Helpful"):
         reply = self.groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": f"you are Mature {reply_type} assistant,don't leave empty space between lines",
+                    "content": f"give reply only in plain paragraphs",
                 }, {
                     "role": "user",
                     "content": f"{command}",

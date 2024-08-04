@@ -85,8 +85,8 @@ text_area.pack(expand=True, fill='both', padx=10)
 
 text_area.mark_set('insert', 'end')
 text_area.bind('<Return>', execute_command)
-text_area.bind('<Key>',
-               lambda e: 'break' if e.keysym in {'Left', 'Right'} else focus_text_area())  # Disable navigation keys
+# text_area.bind('<Key>',
+               # lambda e: 'break' if e.keysym in {'Left', 'Right'} else focus_text_area())  # Disable navigation keys
 text_area.bind('<BackSpace>', backspace_trigger)
 root.bind('<Button-1>', focus_text_area)
 text_area.focus_set()
